@@ -26,11 +26,6 @@
 
   "sheikhs": [
     { "id": "alaa", "name": "علاء حامد", "channel": "https://youtube.com/@3laahamed", "bio": "" },
-    { "id": "amgad", "name": "أمجد سمير", "channel": "", "bio": "" },
-    { "id": "abdelmonem", "name": "أحمد عبدالمنعم", "channel": "", "bio": "" },
-    { "id": "khalid", "name": "خالد الراشد", "channel": "", "bio": "" },
-    { "id": "ghalith", "name": "محمد الغليظ", "channel": "", "bio": "" },
-    { "id": "alarabi", "name": "أحمد العربي", "channel": "", "bio": "" },
-    { "id": "alkamali", "name": "سعيد الكملي", "channel": "", "bio": "" }
+    { "id": "amgad", "name": "أمجد سمير", "channel": "https://www.youtube.com/@amgad_samir", "bio": "" }
   ]
 }
