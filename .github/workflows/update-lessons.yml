@@ -1,0 +1,39 @@
+name: تحديث الدروس
+
+on:
+  schedule:
+    - cron: '30 3 * * *'      # كل يوم 3:30 صباحًا بتوقيت غرينتش (5:30 بتوقيت القاهرة تقريبًا)
+  workflow_dispatch:           # زر «Run workflow» للتشغيل اليدوي
+  push:
+    paths:
+      - 'sources.json'         # أي تعديل على قائمة الشيوخ يعيد البناء مباشرة
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lessons
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: توليد lessons.json
+        env:
+          YT_API_KEY: ${{ secrets.YT_API_KEY }}
+        run: python3 build_lessons.py
+
+      - name: حفظ التغييرات إن وُجدت
+        run: |
+          git config user.name "lessons-bot"
+          git config user.email "lessons-bot@users.noreply.github.com"
+          git add lessons.json report.md
+          if git diff --cached --quiet; then
+            echo "لا تغيير في الدروس."
+          else
+            git commit -m "تحديث الدروس"
+            git push
+          fi
