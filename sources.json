@@ -22,10 +22,31 @@
     { "id": "general", "title": "متنوعة", "words": [] }
   ],
 
-  "playlist_section": {},
+  "playlist_section": {
+    "PLA4-YB8WmU_0": "aqeedah",
+    "PLPkYGF_v57Yg": "seerah",
+    "PLP5vwT5on1hE": "aqeedah",
+    "PLSFJcWy6euuBek1JZwJdqT_3rsUhXtmBv": "raqaiq",
+    "PLSFJcWy6euuA_Ux76wLLUwR7HPpKL9rd-": "aqeedah",
+    "PLSFJcWy6euuAZPTasEUJRSrKEp85h6HPY": "raqaiq",
+    "PLSFJcWy6euuDj6XSqBM-MmKhCyrXK_ywv": "raqaiq"
+  },
 
   "sheikhs": [
     { "id": "alaa", "name": "علاء حامد", "channel": "https://youtube.com/@3laahamed", "bio": "" },
-    { "id": "amgad", "name": "أمجد سمير", "channel": "https://www.youtube.com/@amgad_samir", "bio": "" }
+    { "id": "amgad", "name": "أمجد سمير", "channel": "https://www.youtube.com/@amgad_samir", "bio": "",
+      "playlists": ["PLSFJcWy6euuAZPTasEUJRSrKEp85h6HPY"] },
+    { "id": "kamali", "name": "الكمالي", "channel": "https://youtube.com/@elkamali", "bio": "" },
+    { "id": "samir_moustafa", "name": "سمير مصطفى", "channel": "https://youtube.com/@samirmoustafa", "bio": "" },
+    { "id": "elaraby", "name": "د. أحمد العربي", "channel": "https://youtube.com/@drahmedelarabyofficial", "bio": "",
+      "playlists": ["PLA4-YB8WmU_0", "PLSFJcWy6euuDj6XSqBM-MmKhCyrXK_ywv"] },
+    { "id": "sherif_ali", "name": "شريف علي", "channel": "", "bio": "",
+      "playlists": ["PLPkYGF_v57Yg"] },
+    { "id": "sharqawy", "name": "محمد سعد الشرقاوي", "channel": "", "bio": "",
+      "playlists": ["PLP5vwT5on1hE"] },
+    { "id": "asad_eldin", "name": "أسد الدين الأيوبي", "channel": "", "bio": "",
+      "playlists": ["PLSFJcWy6euuBek1JZwJdqT_3rsUhXtmBv"] },
+    { "id": "haitham_talaat", "name": "د. هيثم طلعت", "channel": "", "bio": "",
+      "playlists": ["PLSFJcWy6euuA_Ux76wLLUwR7HPpKL9rd-"] }
   ]
 }
