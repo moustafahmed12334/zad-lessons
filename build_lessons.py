@@ -201,6 +201,9 @@ def load_cfg():
         if sh['id'] in seen:
             raise Fail('sources.json: معرّف شيخ مكرر: %s' % sh['id'])
         seen.add(sh['id'])
+        for k in ('playlists', 'skip'):
+            if sh.get(k) is not None and not isinstance(sh[k], list):
+                raise Fail('sources.json: «%s» عند %s لازم تكون قائمة بين أقواس مربعة، مثل ["رابط1", "رابط2"].' % (k, sh['name']))
         for k in ('section', 'lectures_section'):
             if sh.get(k) and sh[k] not in ids:
                 raise Fail('sources.json: «%s» عند %s يشير إلى قسم غير موجود: %s' % (k, sh['name'], sh[k]))
@@ -225,30 +228,39 @@ def build(cfg):
     sections_by_id = {s['id']: s for s in cfg['sections']}
     for sh in cfg['sheikhs']:
         ref = (sh.get('channel') or '').strip()
-        if not ref:
-            log('تخطّي «%s»: لا يوجد رابط قناة بعد.' % sh['name'])
+        explicit = sh.get('playlists') or []
+        if not ref and not explicit:
+            log('تخطّي «%s»: لا يوجد رابط قناة ولا قوائم محددة بعد.' % sh['name'])
             continue
         log('— %s' % sh['name'])
-        cid = channel_id(ref)
-        explicit = sh.get('playlists')
+        cid = channel_id(ref) if ref else None
+        # بلا «playlists»: كل قوائم القناة (كما كان). مع «playlists»: هذه القوائم فقط، إلا لو كتبت "scan_channel": true فتُقرأ معها كل قوائم القناة.
+        scan = bool(sh.get('scan_channel')) or not explicit
+        if scan and not cid:
+            log('   تنبيه: «scan_channel» يحتاج رابط قناة؛ سأقرأ القوائم المحددة فقط.')
+            scan = False
         skip = {playlist_id(x) for x in (sh.get('skip') or [])}
+        pls = []
         if explicit:
             ids = [playlist_id(x) for x in explicit]
-            pls = []
             for k in range(0, len(ids), 50):
                 for it in call('playlists', part='snippet', id=','.join(ids[k:k + 50])).get('items', []):
                     pls.append({'id': it['id'], 'title': it['snippet']['title']})
             missing = set(ids) - {p['id'] for p in pls}
             if missing:
                 raise Fail('قوائم غير موجودة أو خاصة عند %s: %s' % (sh['name'], ' '.join(sorted(missing))))
-        else:
-            pls = [{'id': it['id'], 'title': it['snippet']['title']} for it in pages('playlists', part='snippet', channelId=cid)]
+        if scan:
+            have = {p['id'] for p in pls}              # القائمة المحددة التي هي أيضًا على القناة لا تتكرر
+            pls += [{'id': it['id'], 'title': it['snippet']['title']} for it in pages('playlists', part='snippet', channelId=cid) if it['id'] not in have]
         lost = skip - {p['id'] for p in pls}
-        if lost and not explicit:
+        if lost and scan:
             log('   تنبيه: قوائم في «skip» غير موجودة في القناة: %s' % ' '.join(sorted(lost)))
         n_lec = sh.get('lectures')
         if n_lec is None:
-            n_lec = 0 if explicit else cfg['max_orphan_lectures']
+            n_lec = cfg['max_orphan_lectures'] if scan else 0
+        if n_lec and not cid:
+            log('   تنبيه: المحاضرات المنفردة تحتاج رابط قناة؛ تخطّيتها.')
+            n_lec = 0
         in_pl = set()
         got_series = 0
         for pl in pls:
@@ -337,6 +349,10 @@ def main():
         raise Fail('السر YT_API_KEY غير مضبوط. أضفه من Settings ← Secrets and variables ← Actions.')
     cfg = load_cfg()
     out, rep, total = build(cfg)
+    repo = os.environ.get('GITHUB_REPOSITORY', '')
+    if '/' in repo and os.path.exists(os.path.join(HERE, 'player.html')):      # صفحة المشغّل المستضافة (GitHub Pages) لتفادي خطأ يوتيوب 153
+        o, r = repo.split('/', 1)
+        out['player'] = 'https://%s.github.io/%s/player.html' % (o.lower(), r)
     if total > APP_MAX:
         log('تنبيه: الإجمالي %d أكبر من %d، والتطبيق حاليًا يقرأ %d فقط. قلّل المحاضرات المنفردة أو القوائم.' % (total, APP_MAX, APP_MAX))
     data = json.dumps(out, ensure_ascii=False, separators=(',', ':'))
