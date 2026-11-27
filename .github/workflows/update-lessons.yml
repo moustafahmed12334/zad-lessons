@@ -36,5 +36,6 @@ jobs:
             echo "لا تغيير في الدروس."
           else
             git commit -m "تحديث الدروس"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"   # لو تشغيل تاني سبقنا
             git push
           fi
