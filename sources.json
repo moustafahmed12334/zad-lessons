@@ -35,7 +35,8 @@
   "sheikhs": [
     { "id": "alaa", "name": "علاء حامد", "channel": "https://youtube.com/@3laahamed", "bio": "" },
     { "id": "amgad", "name": "أمجد سمير", "channel": "https://www.youtube.com/@amgad_samir", "bio": "",
-      "playlists": ["PLSFJcWy6euuAZPTasEUJRSrKEp85h6HPY"] },
+      "playlists": ["PLSFJcWy6euuAZPTasEUJRSrKEp85h6HPY"],
+      "scan_channel": true },
     { "id": "kamali", "name": "الكمالي", "channel": "https://youtube.com/@elkamali", "bio": "" },
     { "id": "samir_moustafa", "name": "سمير مصطفى", "channel": "https://youtube.com/@samirmoustafa", "bio": "" },
     { "id": "elaraby", "name": "د. أحمد العربي", "channel": "https://youtube.com/@drahmedelarabyofficial", "bio": "",
