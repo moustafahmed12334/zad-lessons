@@ -7,6 +7,7 @@ on:
   push:
     paths:
       - 'sources.json'         # أي تعديل على قائمة الشيوخ يعيد البناء مباشرة
+      - 'build_lessons.py'     # وأي إصلاح في السكربت يعيد البناء أيضًا
 
 permissions:
   contents: write
