@@ -10,6 +10,8 @@
 - قائمة التشغيل = سلسلة، وقسمها من «playlist_section» أو كلمات عنوانها أو الافتراضي.
 - الدرس الواحد يظهر مرة واحدة عند الشيخ (يُحفظ في القسم الأخصّ، و«متنوعة» آخرًا).
 - الفيديوهات التي ليست في أي قائمة تدخل «محاضرات منفردة».
+- الإجمالي لا يتجاوز APP_MAX (حد التطبيق)؛ إن زاد تُقصَّر أقدم المحاضرات المنفردة.
+- شيخ عليه "enabled": false يُتخطّى مؤقتًا بلا حذف بياناته.
 - تستعمل YouTube Data API الرسمي بمفتاح من المتغيّر YT_API_KEY. مكتبة بايثون القياسية فقط.
 - إن فشل أي شيء لا تُكتب النتيجة، فيبقى آخر lessons.json سليمًا كما هو.
 """
@@ -260,12 +262,40 @@ def dedupe(series, rank):
     return [se for se in series if se['lessons']], dropped
 
 
+def enforce_cap(cols, warnings):
+    """يضمن ألا يتجاوز الإجمالي APP_MAX (حد التطبيق) بتقصير أقدم المحاضرات المنفردة فقط."""
+    def total():
+        return sum(sum(len(se['lessons']) for se in c['series']) + len(c['lectures']) for c in cols)
+
+    cut = {}
+    while total() > APP_MAX:
+        cand = None
+        for c in cols:
+            if c['lectures'] and (cand is None or len(c['lectures']) > len(cand['lectures'])):
+                cand = c
+        if cand is None:
+            warnings.append('الإجمالي %d أكبر من حد التطبيق %d ولا توجد محاضرات منفردة كافية لتقصيره. احذف قائمة أو شيخًا من sources.json.' % (total(), APP_MAX))
+            log('تنبيه: الإجمالي %d أكبر من %d ولا توجد محاضرات منفردة كافية لتقصيره.' % (total(), APP_MAX))
+            break
+        cand['lectures'].pop()                      # المحاضرات مرتّبة الأحدث أولًا، فنحذف الأقدم
+        cut[cand['sh']['name']] = cut.get(cand['sh']['name'], 0) + 1
+    if cut:
+        msg = 'للبقاء تحت حد التطبيق (%d درسًا): قُصّرت المحاضرات المنفردة الأقدم عند %s.' % (
+            APP_MAX, '، '.join('%s (%d)' % (n, k) for n, k in cut.items()))
+        warnings.append(msg)
+        log('   ' + msg)
+    return total()
+
+
 def build(cfg):
     rank = {s['id']: i for i, s in enumerate(cfg['sections'])}
     warnings = []
     rep = []
     cols = []                                    # عرض الشيوخ، بترتيب sources.json
     for sh in cfg['sheikhs']:
+        if sh.get('enabled') is False:
+            log('تخطّي «%s»: معطّل مؤقتًا (enabled: false).' % sh['name'])
+            continue
         ref = (sh.get('channel') or '').strip()
         explicit = sh.get('playlists') or []
         if not ref and not explicit:
@@ -357,6 +387,8 @@ def build(cfg):
         log('   %d سلسلة، %d محاضرة منفردة، %d درسًا' % (len(series), len(lectures), n_l + len(lectures)))
         cols.append({'sh': sh, 'cid': cid, 'info': info, 'series': series, 'lectures': lectures,
                      'lec_section': sh.get('lectures_section') or sh.get('section') or cfg['default_section']})
+
+    enforce_cap(cols, warnings)
 
     # ------------------------------------------------------------ عرض الشيوخ
     shaykhs = []
