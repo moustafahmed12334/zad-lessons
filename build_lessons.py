@@ -1,19 +1,10 @@
 #!/usr/bin/env python3
 """يبني lessons.json لتطبيق «زاد المسلم» من قنوات يوتيوب المذكورة في sources.json.
 
-الملف الناتج يخدم عرضين من نفس الدروس:
-- «الشيوخ»: كل شيخ بقناته كاملة (كل قوائمه + محاضراته المنفردة)، وأي سلسلة له
-  مستضافة على قناة أخرى تُضمّ تحت اسمه مع بيان القناة المستضيفة.
-- «الأقسام»: نفس الدروس موزّعة على الأقسام الموضوعية، والشيوخ مختلطون في كل قسم.
-
-قواعد:
-- قائمة التشغيل = سلسلة، وقسمها من «playlist_section» أو كلمات عنوانها أو الافتراضي.
-- الدرس الواحد يظهر مرة واحدة عند الشيخ (يُحفظ في القسم الأخصّ، و«متنوعة» آخرًا).
-- الفيديوهات التي ليست في أي قائمة تدخل «محاضرات منفردة».
-- الإجمالي لا يتجاوز APP_MAX (حد التطبيق)؛ إن زاد تُقصَّر أقدم المحاضرات المنفردة.
-- شيخ عليه "enabled": false يُتخطّى مؤقتًا بلا حذف بياناته.
+- قائمة التشغيل = سلسلة، وتُوزَّع على الأقسام بحسب كلمات عنوانها (أو بتخصيص منك).
+- الفيديوهات التي ليست في أي قائمة تدخل «محاضرات منفردة» (الأحدث أولًا).
 - تستعمل YouTube Data API الرسمي بمفتاح من المتغيّر YT_API_KEY. مكتبة بايثون القياسية فقط.
-- إن فشل أي شيء لا تُكتب النتيجة، فيبقى آخر lessons.json سليمًا كما هو.
+- إن فشل أي شيء لا تُكتب النتيجة، فيبقى آخر lessons.json سليم كما هو.
 """
 import json
 import os
@@ -31,8 +22,7 @@ KEY = os.environ.get('YT_API_KEY', '').strip()
 SRC = os.path.join(HERE, os.environ.get('SOURCES', 'sources.json'))
 OUT = os.path.join(HERE, os.environ.get('OUT_JSON', 'lessons.json'))
 REP = os.path.join(HERE, os.environ.get('OUT_REPORT', 'report.md'))
-APP_MAX = 5000            # التطبيق يقرأ هذا العدد من الدروس كحد أقصى حاليًا
-FORMAT = 2                # نسخة صيغة lessons.json
+APP_MAX = 200000          # حدّ أمان فقط (التطبيق يقرأ الدروس كلها بلا حدّ عملي)
 CALLS = {'n': 0}
 
 
@@ -134,20 +124,7 @@ def playlist_id(ref):
     return m.group(1)
 
 
-CH = {}       # cid -> {'title','avatar'}
-DET = {}      # vid -> {'dur','emb','pub'} أو None (محذوف/خاص)
-
-
-def channel_info(cid):
-    if cid in CH:
-        return CH[cid]
-    d = call('channels', part='snippet', id=cid)
-    it = (d.get('items') or [{}])[0]
-    sn = it.get('snippet') or {}
-    th = sn.get('thumbnails') or {}
-    CH[cid] = {'title': clean(sn.get('title'), 80),
-               'avatar': (th.get('medium') or th.get('default') or {}).get('url', '')}
-    return CH[cid]
+DET = {}
 
 
 def details(ids):
@@ -245,70 +222,21 @@ def pick_section(cfg, sh, pid, title):
 
 
 # ---------------------------------------------------------------- البناء
-def dedupe(series, rank):
-    """يجعل كل درس مرة واحدة عند الشيخ: يبقى في القسم الأخصّ (ترتيب الأقسام في sources.json)."""
-    home = {}
-    dropped = []
-    for se in sorted(series, key=lambda x: rank.get(x['section'], 999)):
-        keep = []
-        for l in se['lessons']:
-            owner = home.get(l['id'])
-            if owner is None:
-                home[l['id']] = se
-                keep.append(l)
-            else:
-                dropped.append((l['id'], l['title'], se['id'], se['title'], owner['title']))
-        se['lessons'] = keep
-    return [se for se in series if se['lessons']], dropped
-
-
-def enforce_cap(cols, warnings):
-    """يضمن ألا يتجاوز الإجمالي APP_MAX (حد التطبيق) بتقصير أقدم المحاضرات المنفردة فقط."""
-    def total():
-        return sum(sum(len(se['lessons']) for se in c['series']) + len(c['lectures']) for c in cols)
-
-    cut = {}
-    while total() > APP_MAX:
-        cand = None
-        for c in cols:
-            if c['lectures'] and (cand is None or len(c['lectures']) > len(cand['lectures'])):
-                cand = c
-        if cand is None:
-            warnings.append('الإجمالي %d أكبر من حد التطبيق %d ولا توجد محاضرات منفردة كافية لتقصيره. احذف قائمة أو شيخًا من sources.json.' % (total(), APP_MAX))
-            log('تنبيه: الإجمالي %d أكبر من %d ولا توجد محاضرات منفردة كافية لتقصيره.' % (total(), APP_MAX))
-            break
-        cand['lectures'].pop()                      # المحاضرات مرتّبة الأحدث أولًا، فنحذف الأقدم
-        cut[cand['sh']['name']] = cut.get(cand['sh']['name'], 0) + 1
-    if cut:
-        msg = 'للبقاء تحت حد التطبيق (%d درسًا): قُصّرت المحاضرات المنفردة الأقدم عند %s.' % (
-            APP_MAX, '، '.join('%s (%d)' % (n, k) for n, k in cut.items()))
-        warnings.append(msg)
-        log('   ' + msg)
-    return total()
-
-
 def build(cfg):
-    rank = {s['id']: i for i, s in enumerate(cfg['sections'])}
-    warnings = []
+    buckets = {s['id']: {} for s in cfg['sections']}          # قسم ← شيخ ← {series, lectures}
     rep = []
-    cols = []                                    # عرض الشيوخ، بترتيب sources.json
+    sections_by_id = {s['id']: s for s in cfg['sections']}
     for sh in cfg['sheikhs']:
-        if sh.get('enabled') is False:
-            log('تخطّي «%s»: معطّل مؤقتًا (enabled: false).' % sh['name'])
-            continue
         ref = (sh.get('channel') or '').strip()
         explicit = sh.get('playlists') or []
         if not ref and not explicit:
-            warnings.append('تخطّي «%s»: لا يوجد رابط قناة ولا قوائم محددة بعد.' % sh['name'])
             log('تخطّي «%s»: لا يوجد رابط قناة ولا قوائم محددة بعد.' % sh['name'])
             continue
         log('— %s' % sh['name'])
         cid = channel_id(ref) if ref else None
-        info = channel_info(cid) if cid else {}
-        # بلا «playlists»: كل قوائم القناة. مع «playlists»: هذه القوائم فقط، إلا لو كتبت "scan_channel": true فتُقرأ معها كل قوائم القناة.
+        # بلا «playlists»: كل قوائم القناة (كما كان). مع «playlists»: هذه القوائم فقط، إلا لو كتبت "scan_channel": true فتُقرأ معها كل قوائم القناة.
         scan = bool(sh.get('scan_channel')) or not explicit
         if scan and not cid:
-            warnings.append('«%s»: «scan_channel» يحتاج رابط قناة؛ سأقرأ القوائم المحددة فقط.' % sh['name'])
             log('   تنبيه: «scan_channel» يحتاج رابط قناة؛ سأقرأ القوائم المحددة فقط.')
             scan = False
         skip = {playlist_id(x) for x in (sh.get('skip') or [])}
@@ -317,20 +245,13 @@ def build(cfg):
             ids = [playlist_id(x) for x in explicit]
             for k in range(0, len(ids), 50):
                 for it in call('playlists', part='snippet', id=','.join(ids[k:k + 50])).get('items', []):
-                    sn = it.get('snippet', {})
-                    pls.append({'id': it['id'], 'title': sn.get('title', ''),
-                                'ch': sn.get('channelId', ''), 'cht': sn.get('channelTitle', '')})
+                    pls.append({'id': it['id'], 'title': it['snippet']['title']})
             missing = set(ids) - {p['id'] for p in pls}
             if missing:
                 raise Fail('قوائم غير موجودة أو خاصة عند %s: %s' % (sh['name'], ' '.join(sorted(missing))))
         if scan:
             have = {p['id'] for p in pls}              # القائمة المحددة التي هي أيضًا على القناة لا تتكرر
-            for it in pages('playlists', part='snippet', channelId=cid):
-                if it['id'] in have:
-                    continue
-                sn = it.get('snippet', {})
-                pls.append({'id': it['id'], 'title': sn.get('title', ''),
-                            'ch': sn.get('channelId', cid), 'cht': sn.get('channelTitle', info.get('title', ''))})
+            pls += [{'id': it['id'], 'title': it['snippet']['title']} for it in pages('playlists', part='snippet', channelId=cid) if it['id'] not in have]
         lost = skip - {p['id'] for p in pls}
         if lost and scan:
             log('   تنبيه: قوائم في «skip» غير موجودة في القناة: %s' % ' '.join(sorted(lost)))
@@ -341,158 +262,84 @@ def build(cfg):
             log('   تنبيه: المحاضرات المنفردة تحتاج رابط قناة؛ تخطّيتها.')
             n_lec = 0
         in_pl = set()
-        series = []
+        got_series = 0
         for pl in pls:
             vs = list(playlist_items(pl['id']))
             in_pl.update(v['id'] for v in vs)
-            if pl['id'] in skip:
-                log('   استُبعدت قائمة: %s' % pl['title'])
-                continue
-            if not vs:
-                warnings.append('«%s»: القائمة «%s» (`%s`) لا تحتوي فيديوهات ظاهرة — لم تُضف.' % (sh['name'], clean(pl['title'], 60), pl['id']))
-                log('   تنبيه: قائمة فارغة: %s' % pl['title'])
+            if pl['id'] in skip or not vs:
                 continue
             details([v['id'] for v in vs])
             ls = [lesson(v, DET[v['id']]) for v in vs if DET.get(v['id']) and DET[v['id']]['pub'] and DET[v['id']]['dur'] > 0]
             if not ls:
-                warnings.append('«%s»: كل فيديوهات «%s» خاصة أو محذوفة — لم تُضف.' % (sh['name'], clean(pl['title'], 60)))
-                log('   تنبيه: كل فيديوهات القائمة خاصة/محذوفة: %s' % pl['title'])
                 continue
             sid, why = pick_section(cfg, sh, pl['id'], pl['title'])
-            host = 'other' if (pl['ch'] and cid and pl['ch'] != cid) else ('other' if not cid else 'own')
-            ser = {'id': pl['id'], 'title': clean(pl['title'], 120), 'section': sid, 'host': host,
-                   'lessons': ls}
-            if host == 'other':
-                ser['host_channel'] = clean(pl['cht'], 80)
+            ser = {'id': pl['id'], 'title': clean(pl['title'], 120), 'lessons': ls}
             if recent(vs):
                 ser['new'] = True
-            series.append(ser)
-            rep.append((sh['name'], cfg_section_title(cfg, sid), ser['title'], len(ls), pl['id'], why,
-                        ser.get('host_channel', '') if host == 'other' else ''))
-        series, dropped = dedupe(series, rank)
-        if dropped:
-            log('   حُذف %d تكرارًا (الدرس محفوظ في قسمه الأخصّ).' % len(dropped))
-        lectures = []
+            buckets[sid].setdefault(sh['id'], {'sh': sh, 'series': [], 'lectures': []})['series'].append(ser)
+            rep.append((sh['name'], sections_by_id[sid]['title'], ser['title'], len(ls), pl['id'], why))
+            got_series += 1
+        got_lec = 0
         if n_lec:
+            lecs = []
             for v in playlist_items('UU' + cid[2:]):       # قائمة «التحميلات» = كل فيديوهات القناة، الأحدث أولًا
                 if v['id'] in in_pl:
                     continue
                 details([v['id']])
                 d = DET.get(v['id'])
                 if d and d['pub'] and d['dur'] >= cfg['min_lecture_seconds']:
-                    lectures.append(lesson(v, d))
-                    if len(lectures) >= n_lec:
+                    lecs.append(lesson(v, d))
+                    if len(lecs) >= n_lec:
                         break
-        n_l = sum(len(se['lessons']) for se in series)
-        log('   %d سلسلة، %d محاضرة منفردة، %d درسًا' % (len(series), len(lectures), n_l + len(lectures)))
-        cols.append({'sh': sh, 'cid': cid, 'info': info, 'series': series, 'lectures': lectures,
-                     'lec_section': sh.get('lectures_section') or sh.get('section') or cfg['default_section']})
-
-    enforce_cap(cols, warnings)
-
-    # ------------------------------------------------------------ عرض الشيوخ
-    shaykhs = []
-    for c in cols:
-        sh = c['sh']
-        x = {'id': sh['id'], 'name': clean(sh['name'], 80), 'bio': clean(sh.get('bio'), 200)}
-        if sh.get('channel'):
-            x['channel'] = sh['channel']
-        if c['cid']:
-            x['channel_id'] = c['cid']
-        if c['info'].get('avatar'):
-            x['avatar'] = c['info']['avatar']
-        if any(se.get('new') for se in c['series']):
-            x['new'] = True
-        x['counts'] = {'series': len(c['series']),
-                       'lessons': sum(len(se['lessons']) for se in c['series']) + len(c['lectures'])}
-        if c['series']:
-            x['series'] = c['series']
-        if c['lectures']:
-            x['lectures'] = c['lectures']
-        shaykhs.append(x)
-
-    # ------------------------------------------------------------ عرض الأقسام
-    sections = []
-    total_sections = 0
+            if lecs:
+                sid = sh.get('lectures_section') or sh.get('section') or cfg['default_section']
+                buckets[sid].setdefault(sh['id'], {'sh': sh, 'series': [], 'lectures': []})['lectures'] = lecs
+                got_lec = len(lecs)
+        log('   %d سلسلة، %d محاضرة منفردة' % (got_series, got_lec))
+    out = {'title': clean(cfg.get('title'), 60) or 'الدروس والمحاضرات', 'sections': []}
+    total = 0
     for s in cfg['sections']:
+        b = buckets[s['id']]
         shks = []
-        for c in cols:
-            sh = c['sh']
-            ser = [se for se in c['series'] if se['section'] == s['id']]
-            lec = c['lectures'] if c['lec_section'] == s['id'] else []
-            if not ser and not lec:
+        for sh in cfg['sheikhs']:
+            e = b.get(sh['id'])
+            if not e:
                 continue
-            y = {'id': sh['id'], 'name': clean(sh['name'], 80), 'bio': clean(sh.get('bio'), 200)}
-            if any(se.get('new') for se in ser):
-                y['new'] = True
-            if ser:
-                y['series'] = [{'id': se['id'], 'title': se['title'], 'host': se['host'],
-                                **({'host_channel': se['host_channel']} if se.get('host_channel') else {}),
-                                **({'new': True} if se.get('new') else {}),
-                                'lessons': se['lessons']} for se in ser]
-            if lec:
-                y['lectures'] = lec
-            total_sections += sum(len(se['lessons']) for se in ser) + len(lec)
-            shks.append(y)
+            x = {'id': sh['id'], 'name': clean(sh['name'], 80), 'bio': clean(sh.get('bio'), 200)}
+            if any(se.get('new') for se in e['series']):
+                x['new'] = True
+            if e['series']:
+                x['series'] = e['series']
+            if e['lectures']:
+                x['lectures'] = e['lectures']
+            total += sum(len(se['lessons']) for se in e['series']) + len(e['lectures'])
+            shks.append(x)
         if shks:
             sec = {'id': s['id'], 'title': clean(s['title'], 60), 'shaykhs': shks}
             if s.get('icon'):
                 sec['icon'] = s['icon']
-            sections.append(sec)
-    if not sections:
+            out['sections'].append(sec)
+    if not out['sections']:
         raise Fail('لم أجد أي درس. تأكد من روابط القنوات في sources.json.')
-    total = sum(x['counts']['lessons'] for x in shaykhs)
-    out = {'title': clean(cfg.get('title'), 60) or 'الدروس والمحاضرات',
-           'version': FORMAT,
-           'updated': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-           'counts': {'shaykhs': len(shaykhs),
-                      'series': sum(len(x.get('series', [])) for x in shaykhs),
-                      'lessons': total,
-                      'section_entries': total_sections},
-           'shaykhs': shaykhs,
-           'sections': sections}
-    return out, rep, total, warnings
+    return out, rep, total
 
 
-def cfg_section_title(cfg, sid):
-    for s in cfg['sections']:
-        if s['id'] == sid:
-            return s['title']
-    return sid
-
-
-def write_report(rep, total, out, cfg, warnings):
-    L = ['# ملخص آخر تحديث', '',
-         'إجمالي الدروس: **%d** (في %d قسمًا، عند %d شيخًا)' % (
-             total, len(out['sections']), out['counts']['shaykhs']), '']
-    L += ['## الشيوخ', '']
-    for sh in out['shaykhs']:
-        nl = len(sh.get('lectures', []))
-        other = [se for se in sh.get('series', []) if se.get('host') == 'other']
-        line = '- **%s**: %d سلسلة%s، %d درسًا' % (sh['name'], len(sh.get('series', [])),
-                                                   ('، و%d محاضرة منفردة' % nl) if nl else '', sh['counts']['lessons'])
-        if other:
-            line += ' — منها %d سلسلة على قنوات أخرى: %s' % (
-                len(other), '، '.join('«%s» (%s)' % (se['title'], se.get('host_channel') or 'قناة أخرى') for se in other[:3]))
-        L.append(line)
-    L += ['', '## الأقسام', '']
+def write_report(rep, total, out, cfg):
+    L = ['# ملخص آخر تحديث', '', 'إجمالي الدروس: **%d**' % total, '']
     for sec in out['sections']:
-        L += ['### ' + sec['title'], '']
+        L += ['## ' + sec['title'], '']
         for sh in sec['shaykhs']:
             nl = len(sh.get('lectures', []))
-            L.append('- %s: %d سلسلة%s' % (sh['name'], len(sh.get('series', [])), ('، و%d محاضرة' % nl) if nl else ''))
+            L.append('- **%s**: %d سلسلة%s' % (sh['name'], len(sh.get('series', [])), ('، و%d محاضرة منفردة' % nl) if nl else ''))
         L.append('')
     L += ['## القوائم وأقسامها', '', 'لتغيير قسم قائمة: أضف معرّفها وقسمها في «playlist_section» داخل sources.json.', '',
-          '| الشيخ | القسم | السلسلة | الدروس | معرّف القائمة | كيف اختير القسم | القناة المستضيفة |', '|---|---|---|---|---|---|---|']
+          '| الشيخ | القسم | السلسلة | الدروس | معرّف القائمة | كيف اختير القسم |', '|---|---|---|---|---|---|']
     for r in rep:
-        L.append('| %s | %s | %s | %d | `%s` | %s | %s |' % (r[0], r[1], r[2].replace('|', '/'), r[3], r[4], r[5], r[6].replace('|', '/')))
+        L.append('| %s | %s | %s | %d | `%s` | %s |' % (r[0], r[1], r[2].replace('|', '/'), r[3], r[4], r[5]))
     odd = [r for r in rep if r[5] == 'افتراضي']
     if odd:
         L += ['', '## قوائم لم يُعرف قسمها (وُضعت في القسم الافتراضي)', '']
         L += ['- %s — «%s» (`%s`)' % (r[0], r[2], r[4]) for r in odd]
-    if warnings:
-        L += ['', '## تنبيهات', '']
-        L += ['- ' + w for w in warnings]
     with open(REP, 'w', encoding='utf8') as f:
         f.write('\n'.join(L) + '\n')
 
@@ -501,21 +348,20 @@ def main():
     if not KEY:
         raise Fail('السر YT_API_KEY غير مضبوط. أضفه من Settings ← Secrets and variables ← Actions.')
     cfg = load_cfg()
-    out, rep, total, warnings = build(cfg)
+    out, rep, total = build(cfg)
     repo = os.environ.get('GITHUB_REPOSITORY', '')
     if '/' in repo and os.path.exists(os.path.join(HERE, 'player.html')):      # صفحة المشغّل المستضافة (GitHub Pages) لتفادي خطأ يوتيوب 153
         o, r = repo.split('/', 1)
         out['player'] = 'https://%s.github.io/%s/player.html' % (o.lower(), r)
     if total > APP_MAX:
-        log('تنبيه: الإجمالي %d أكبر من %d، والتطبيق حاليًا يقرأ %d فقط. ارفع الحد في التطبيق أو قلّل المحاضرات المنفردة.' % (total, APP_MAX, APP_MAX))
+        log('تنبيه: الإجمالي %d أكبر من %d، والتطبيق حاليًا يقرأ %d فقط. قلّل المحاضرات المنفردة أو القوائم.' % (total, APP_MAX, APP_MAX))
     data = json.dumps(out, ensure_ascii=False, separators=(',', ':'))
     tmp = OUT + '.tmp'
     with open(tmp, 'w', encoding='utf8') as f:
         f.write(data)
     os.replace(tmp, OUT)
-    write_report(rep, total, out, cfg, warnings)
-    log('تم: %d درسًا في %d قسمًا عند %d شيخًا (%d طلب إلى يوتيوب، حجم الملف %d كيلوبايت)' % (
-        total, len(out['sections']), out['counts']['shaykhs'], CALLS['n'], len(data.encode('utf8')) // 1024))
+    write_report(rep, total, out, cfg)
+    log('تم: %d درسًا في %d قسمًا (%d طلب إلى يوتيوب، حجم الملف %d كيلوبايت)' % (total, len(out['sections']), CALLS['n'], len(data.encode('utf8')) // 1024))
 
 
 if __name__ == '__main__':
